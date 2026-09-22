@@ -1,0 +1,34 @@
+name: variants
+
+channels:
+  - conda-forge
+  - bioconda
+
+dependencies:
+  # Core Python and tooling
+  - python=3.11
+
+  # Workflow
+  - snakemake=8.24.1
+
+  # Reference / alignment / utilities
+  - bowtie2=2.5.4
+  - samtools=1.20
+  - bcftools=1.20
+  - wget=1.21.4
+
+  # Data analysis and plotting
+  - numpy=1.26.*
+  - pandas=2.2.*
+  - scipy=1.11.*
+  - matplotlib=3.8.*
+  - seaborn=0.13.*
+  - biopython=1.83.*
+  - scikit-learn=1.4.*
+
+  # Variant calling
+  - gatk4
+  - freebayes
+
+  # Benchmarking
+  - holodeck=0.3
