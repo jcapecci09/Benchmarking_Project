@@ -12,7 +12,7 @@ dependencies:
   - snakemake=8.24.1
 
   # Reference / alignment / utilities
-  - bowtie2=2.5.4
+  - minimap2=2.31
   - samtools=1.20
   - bcftools=1.20
   - wget=1.21.4
