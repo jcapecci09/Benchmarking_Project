@@ -25,6 +25,7 @@ dependencies:
   - seaborn=0.13.*
   - biopython=1.83.*
   - scikit-learn=1.4.*
+  - rtg-core=3.13
 
   # Variant calling
   - gatk4
