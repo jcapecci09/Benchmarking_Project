@@ -4,9 +4,8 @@ seed = config['seed']
 folder  = config['folder']
 
 rule all:
-    output:
-        sdf = directory(f'Data/{chromosome}/{folder}/{chromosome}.sdf'),
-        bcf_acc = directory(f'Data/{chromosome}/{folder}/benchmarking/accuracy')
+    input:
+        f'Data/{chromosome}/{folder}/benchmarking/collected.done'
 
 
 rule download_chromosome20:
@@ -115,7 +114,7 @@ rule build_bowtie_index:
 
 rule align_reads:
     input:
-        index = f'Data/{chromosome}/{folder}/bowtie_index/{chromosome}.1.bt2',
+        ref = f'Data/{chromosome}/{chromosome}.fa',
         r1 = f'Data/{chromosome}/{folder}/simulated/sim.r1.fastq.gz',
         r2 = f'Data/{chromosome}/{folder}/simulated/sim.r2.fastq.gz'
 
@@ -127,14 +126,15 @@ rule align_reads:
         '''
         mkdir -p Data/{chromosome}/{folder}/aligned
 
-        bowtie2 \
-        -x Data/{chromosome}/{folder}/bowtie_index/{chromosome} \
-        -1 {input.r1} \
-        -2 {input.r2} \
-        -p 4 \
-        | samtools sort \
-        -o {output.bam} 
-        
+        minimap2 \
+            -ax sr \
+            {input.ref} \\
+            {input.r1} \
+            {input.r2} \
+            -t 4 \
+            | samtools sort \
+            -o {output.bam}
+
         samtools index {output.bam}
         '''
 
@@ -213,4 +213,22 @@ rule evaluate_vcf:
 
         mv {output.output_dir}/summary.txt \
         {output.output_dir}/bcftools_accuracy.txt
+        '''
+
+
+rule append_to_csv:
+    input:
+        bench = f'Data/{chromosome}/{folder}/benchmarking/bcftools.txt',
+        acc_dir = f'Data/{chromosome}/{folder}/benchmarking/accuracy'
+
+    params:
+        bench_dir = f'Data/{chromosome}/{folder}/benchmarking'
+    
+    output:
+        f'Data/{chromosome}/{folder}/benchmarking/collected.done'
+    
+    shell:
+        '''
+        python scripts/collect_stats.py -i {params.bench_dir} -r {chromosome} -c {coverage} -s {seed}
+        touch {output}
         '''
