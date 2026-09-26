@@ -8,7 +8,7 @@ rule all:
         f'Data/{chromosome}/{folder}/benchmarking/collected.done'
 
 
-rule download_chromosome20:
+rule download_reference:
     output:
         f'Data/{chromosome}/{chromosome}.fa.gz'
 
@@ -90,28 +90,6 @@ rule generate_reads:
         '''
 
 
-rule build_bowtie_index:
-    input:
-        ref = f'Data/{chromosome}/{chromosome}.fa'
-
-    output:
-        f'Data/{chromosome}/{folder}/bowtie_index/{chromosome}.1.bt2',
-        f'Data/{chromosome}/{folder}/bowtie_index/{chromosome}.2.bt2',
-        f'Data/{chromosome}/{folder}/bowtie_index/{chromosome}.3.bt2',
-        f'Data/{chromosome}/{folder}/bowtie_index/{chromosome}.4.bt2',
-        f'Data/{chromosome}/{folder}/bowtie_index/{chromosome}.rev.1.bt2',
-        f'Data/{chromosome}/{folder}/bowtie_index/{chromosome}.rev.2.bt2'
-
-    shell:
-        '''
-        mkdir -p Data/{chromosome}/{folder}/bowtie_index
-
-        bowtie2-build \
-        {input.ref} \
-        Data/{chromosome}/{folder}/bowtie_index/{chromosome}
-        '''
-
-
 rule align_reads:
     input:
         ref = f'Data/{chromosome}/{chromosome}.fa',
@@ -119,8 +97,8 @@ rule align_reads:
         r2 = f'Data/{chromosome}/{folder}/simulated/sim.r2.fastq.gz'
 
     output:
-        bam = f'Data/{chromosome}/{folder}/aligned/bowtie2_sorted.bam',
-        bam_index = f'Data/{chromosome}/{folder}/aligned/bowtie2_sorted.bam.bai'
+        bam = f'Data/{chromosome}/{folder}/aligned/minimap2_sorted.bam',
+        bam_index = f'Data/{chromosome}/{folder}/aligned/minimap2_sorted.bam.bai'
 
     shell:
         '''
@@ -128,7 +106,7 @@ rule align_reads:
 
         minimap2 \
             -ax sr \
-            {input.ref} \\
+            {input.ref} \
             {input.r1} \
             {input.r2} \
             -t 4 \
@@ -144,8 +122,8 @@ rule benchmark_bcftools:
 
     input:
         ref = f'Data/{chromosome}/{chromosome}.fa',
-        bam = f'Data/{chromosome}/{folder}/aligned/bowtie2_sorted.bam',
-        bam_index = f'Data/{chromosome}/{folder}/aligned/bowtie2_sorted.bam.bai'
+        bam = f'Data/{chromosome}/{folder}/aligned/minimap2_sorted.bam',
+        bam_index = f'Data/{chromosome}/{folder}/aligned/minimap2_sorted.bam.bai'
     
     output:
         vcf = f'Data/{chromosome}/{folder}/vcfs/bcftools.vcf.gz',
@@ -168,18 +146,44 @@ rule benchmark_bcftools:
         '
         '''
 
+rule benchmark_freebayes:
+    threads: 1
+
+    input:
+        ref = f'Data/{chromosome}/{chromosome}.fa',
+        bam = f'Data/{chromosome}/{folder}/aligned/minimap2_sorted.bam',
+        bam_index = f'Data/{chromosome}/{folder}/aligned/minimap2_sorted.bam.bai'
+
+    output:
+        vcf = f'Data/{chromosome}/{folder}/vcfs/freebayes.vcf.gz',
+        bench = f'Data/{chromosome}/{folder}/benchmarking/freebayes.txt'
+
+    shell:
+        '''
+        mkdir -p $(dirname {output.vcf})
+        mkdir -p $(dirname {output.bench})
+
+        /usr/bin/time -v -o {output.bench} \
+        freebayes \
+            -f {input.ref} \
+            {input.bam} \
+        | bgzip -c > {output.vcf}
+        '''
 
 rule normalize_vcf:
     input:
         ref = f'Data/{chromosome}/{chromosome}.fa',
         truth = f'Data/{chromosome}/{folder}/simulated/truth.vcf',
-        bcf =  f'Data/{chromosome}/{folder}/vcfs/bcftools.vcf.gz'
+        bcf =  f'Data/{chromosome}/{folder}/vcfs/bcftools.vcf.gz',
+        fb = f'Data/{chromosome}/{folder}/vcfs/freebayes.vcf.gz',
     
     output:
         norm_truth = f'Data/{chromosome}/{folder}/simulated/truth_norm.vcf.gz',
         norm_truth_index = f'Data/{chromosome}/{folder}/simulated/truth_norm.vcf.gz.tbi',
         norm_bcf = f'Data/{chromosome}/{folder}/vcfs/bcftools_norm.vcf.gz',
-        norm_bcf_index = f'Data/{chromosome}/{folder}/vcfs/bcftools_norm.vcf.gz.tbi'
+        norm_bcf_index = f'Data/{chromosome}/{folder}/vcfs/bcftools_norm.vcf.gz.tbi',
+        norm_fb = f'Data/{chromosome}/{folder}/vcfs/freebayes_norm.vcf.gz',
+        norm_fb_index = f'Data/{chromosome}/{folder}/vcfs/freebayes_norm.vcf.gz.tbi',
 
     shell:
         '''
@@ -187,6 +191,8 @@ rule normalize_vcf:
         bcftools index -t {output.norm_truth}
         bcftools norm -f {input.ref} -Oz -o {output.norm_bcf} {input.bcf}
         bcftools index -t {output.norm_bcf}
+        bcftools norm -f {input.ref} -Oz -o {output.norm_fb} {input.fb}
+        bcftools index -t {output.norm_fb}
         '''
 
 
@@ -194,41 +200,64 @@ rule evaluate_vcf:
     input:
         norm_truth = f'Data/{chromosome}/{folder}/simulated/truth_norm.vcf.gz',
         norm_bcf = f'Data/{chromosome}/{folder}/vcfs/bcftools_norm.vcf.gz',
-        ref =  f'Data/{chromosome}/{chromosome}.fa'
-    
+        norm_fb = f'Data/{chromosome}/{folder}/vcfs/freebayes_norm.vcf.gz',
+        ref = f'Data/{chromosome}/{chromosome}.fa'
+
     output:
-        sdf = directory(f'Data/{chromosome}/{folder}/{chromosome}.sdf'),
-        output_dir = directory(f'Data/{chromosome}/{folder}/benchmarking/accuracy')
+        sdf = directory(f'Data/{chromosome}/{chromosome}.sdf'),
+        bcf_acc = f'Data/{chromosome}/{folder}/benchmarking/accuracy/bcftools_accuracy.txt',
+        fb_acc = f'Data/{chromosome}/{folder}/benchmarking/accuracy/freebayes_accuracy.txt'
 
     shell:
         '''
+        mkdir -p Data/{chromosome}/{folder}/benchmarking/accuracy
+
         rtg format -o {output.sdf} {input.ref}
+
         rtg vcfeval \
-        -b {input.norm_truth} \
-        -c {input.norm_bcf} \
-        -t {output.sdf} \
-        -o {output.output_dir}
+            -b {input.norm_truth} \
+            -c {input.norm_bcf} \
+            -t {output.sdf} \
+            -o Data/{chromosome}/{folder}/benchmarking/accuracy/bcftools
 
-        find {output.output_dir} -type f ! -name 'summary.txt' -delete
+        mv Data/{chromosome}/{folder}/benchmarking/accuracy/bcftools/summary.txt \
+           {output.bcf_acc}
 
-        mv {output.output_dir}/summary.txt \
-        {output.output_dir}/bcftools_accuracy.txt
+        rm -rf Data/{chromosome}/{folder}/benchmarking/accuracy/bcftools
+
+
+        rtg vcfeval \
+            -b {input.norm_truth} \
+            -c {input.norm_fb} \
+            -t {output.sdf} \
+            -o Data/{chromosome}/{folder}/benchmarking/accuracy/freebayes
+
+        mv Data/{chromosome}/{folder}/benchmarking/accuracy/freebayes/summary.txt \
+           {output.fb_acc}
+
+        rm -rf Data/{chromosome}/{folder}/benchmarking/accuracy/freebayes
         '''
 
 
 rule append_to_csv:
     input:
-        bench = f'Data/{chromosome}/{folder}/benchmarking/bcftools.txt',
-        acc_dir = f'Data/{chromosome}/{folder}/benchmarking/accuracy'
+        bcf_bench = f'Data/{chromosome}/{folder}/benchmarking/bcftools.txt',
+        fb_bench = f'Data/{chromosome}/{folder}/benchmarking/freebayes.txt',
+        bcf_acc = f'Data/{chromosome}/{folder}/benchmarking/accuracy/bcftools_accuracy.txt',
+        fb_acc = f'Data/{chromosome}/{folder}/benchmarking/accuracy/freebayes_accuracy.txt'
 
     params:
         bench_dir = f'Data/{chromosome}/{folder}/benchmarking'
-    
+
     output:
         f'Data/{chromosome}/{folder}/benchmarking/collected.done'
-    
+
     shell:
         '''
-        python scripts/collect_stats.py -i {params.bench_dir} -r {chromosome} -c {coverage} -s {seed}
+        python scripts/collect_stats.py \
+            -i {params.bench_dir} \
+            -r {chromosome} \
+            -c {coverage} \
+            -s {seed}
         touch {output}
         '''
